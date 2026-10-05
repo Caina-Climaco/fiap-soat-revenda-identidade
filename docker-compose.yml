@@ -1,0 +1,81 @@
+# Servico de identidade para DESENVOLVIMENTO e para o CI (Keycloak + PostgreSQL proprios).
+#   Keycloak  http://localhost:8180   (realm revenda; admin em /admin)
+# O banco do Keycloak fica numa rede interna, sem porta publicada. A API (outro
+# repositorio) so precisa do endereco publico http://localhost:8180 (issuer e JWKS).
+#
+# Uso:
+#   cp .env.example .env        # e troque os valores (o .env e ignorado pelo Git)
+#   docker compose up -d
+#
+# O Keycloak importa ./keycloak/realm-revenda.json so na primeira subida (o realm fica no
+# volume keycloak-db). Para recriar do zero: docker compose down -v
+
+name: revenda-identidade
+
+services:
+  keycloak-db:
+    image: postgres:16.15-alpine
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: ${KC_DB_USERNAME:-keycloak}
+      POSTGRES_PASSWORD: ${KC_DB_PASSWORD:?defina KC_DB_PASSWORD no .env}
+    volumes:
+      - keycloak-db:/var/lib/postgresql/data
+    networks: [identidade]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d keycloak"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.1
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: ${KC_DB_USERNAME:-keycloak}
+      KC_DB_PASSWORD: ${KC_DB_PASSWORD:?defina KC_DB_PASSWORD no .env}
+      KC_HOSTNAME: http://localhost:8180
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:?defina KC_BOOTSTRAP_ADMIN_PASSWORD no .env}
+      # Substituem os placeholders do realm-revenda.json no import.
+      GESTOR_PASSWORD: ${GESTOR_PASSWORD:?defina GESTOR_PASSWORD no .env}
+      E2E_ADMIN_CLIENT_SECRET: ${E2E_ADMIN_CLIENT_SECRET:?defina E2E_ADMIN_CLIENT_SECRET no .env}
+    volumes:
+      - ./keycloak/realm-revenda.json:/opt/keycloak/data/import/realm-revenda.json:ro
+    ports:
+      - "127.0.0.1:8180:8080"
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    networks: [identidade, publica]
+    healthcheck:
+      # A imagem (ubi9-micro) nao tem curl: requisicao HTTP crua a porta de gerenciamento
+      # (9000), lida so com builtins do bash, sem depender de grep.
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          while IFS= read -r linha <&3 || [ -n "$$linha" ]; do
+          case "$$linha" in *'"UP"'*) exit 0 ;; esac; linha=; done; exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  keycloak-db:
+
+networks:
+  # Rede interna: o banco nao tem rota para fora nem porta no host.
+  identidade:
+    internal: true
+  publica:

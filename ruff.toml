@@ -1,0 +1,9 @@
+# Lint e formatacao dos testes do realm (unico codigo Python deste repositorio).
+line-length = 100
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[lint.isort]
+known-first-party = ["conftest"]
