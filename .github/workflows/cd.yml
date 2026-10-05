@@ -1,0 +1,197 @@
+# Entrega continua do servico de identidade (docs/ci-cd.md).
+# Roda SOMENTE no runner self-hosted deste repositorio, um container Linux no Docker
+# Desktop do PC do autor (infra/runner; labels self-hosted, Linux, kind-local), e SOMENTE
+# em push na main (PR mergeado) ou disparo manual. Nenhum workflow self-hosted reage a
+# pull_request. O container esta na rede docker "kind" e grava o state do Terraform em
+# /revenda-state/identidade.tfstate (bind mount de %USERPROFILE%\.revenda; o mesmo
+# arquivo usado pelo scripts/windows/04-subir-ambiente.ps1). O state da API e outro.
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "SHA (ou branch/tag) a implantar. Vazio = commit atual da main. Use para rollback."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-identidade
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: [self-hosted, Linux, kind-local]
+    environment: local
+    timeout-minutes: 45
+    env:
+      KIND_CLUSTER: revenda
+      NS_ID: identidade
+      # NodePort pelo nome do no na rede "kind" (localhost:8180 e do host Windows).
+      # O issuer dos tokens continua http://localhost:8180/realms/revenda (KC_HOSTNAME fixo).
+      KEYCLOAK_URL: http://revenda-control-plane:30180
+      STATE_DIR: /revenda-state
+      TF_DATA_DIR: /home/runner/persist/terraform-data-identidade
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          clean: true
+          persist-credentials: false
+          fetch-depth: 0
+
+      # Disparo manual so implanta commits que ja estao na main (revisados por PR, CI verde).
+      - name: Valida que o commit pertence a main (workflow_dispatch)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          REF_SOLICITADA: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::O commit ${SHA} (ref solicitada: '${REF_SOLICITADA:-}') nao pertence ao historico da main."
+            exit 1
+          fi
+          echo "OK: ${SHA} pertence ao historico da main."
+
+      - name: Contexto (SHA, diretorios, kubeconfig)
+        run: |
+          set -euo pipefail
+          KCFG="${HOME}/.kube/config"
+          mkdir -p "$TF_DATA_DIR" "$(dirname "$KCFG")"
+          if [ ! -d "$STATE_DIR" ] || [ ! -w "$STATE_DIR" ]; then
+            echo "::error::${STATE_DIR} ausente ou sem escrita: o container do runner precisa do bind mount de %USERPROFILE%\\.revenda (scripts/windows/03-instalar-runner.ps1)"
+            exit 1
+          fi
+          {
+            echo "SHA=$(git rev-parse HEAD)"
+            echo "KUBECONFIG=${KCFG}"
+            echo "TF_VAR_kubeconfig_path=${KCFG}"
+          } >> "$GITHUB_ENV"
+          for ferramenta in docker kind kubectl terraform python3 curl base64; do
+            command -v "$ferramenta" >/dev/null 2>&1 || { echo "::error::Ferramenta ausente no PATH do runner: $ferramenta"; exit 1; }
+          done
+          kind version
+          terraform version
+
+      # Cluster compartilhado da plataforma local (ADR-003): quem chegar primeiro cria, com a
+      # mesma configuracao (infra/kind/cluster.yaml, identica nos dois repositorios).
+      - name: Cluster kind (cria se nao existir)
+        run: |
+          set -euo pipefail
+          existe() {
+            kind get clusters 2>/dev/null | grep -qx "$KIND_CLUSTER" \
+              && [ "$(docker inspect -f '{{.State.Running}}' "${KIND_CLUSTER}-control-plane" 2>/dev/null)" = "true" ]
+          }
+          # Exclusao mutua entre os CDs dos dois repositorios (o cluster e compartilhado):
+          # `docker network create` e atomico e falha se a rede ja existir. Sem isso, um
+          # `kind create` que perde a corrida apaga, ao falhar, o no que o outro criou.
+          TRAVA=revenda-kind-criando
+          if existe; then
+            echo "Cluster kind '$KIND_CLUSTER' ja existe."
+          elif docker network create "$TRAVA" >/dev/null 2>&1; then
+            trap 'docker network rm "$TRAVA" >/dev/null 2>&1 || true' EXIT
+            if existe; then
+              echo "Cluster kind '$KIND_CLUSTER' ja existe."
+            else
+              kind create cluster --config infra/kind/cluster.yaml --wait 120s
+            fi
+          else
+            echo "O CD do outro repositorio esta criando o cluster; aguardando (ate 6 min)..."
+            for _ in $(seq 1 72); do
+              if existe && ! docker network inspect "$TRAVA" >/dev/null 2>&1; then break; fi
+              sleep 5
+            done
+            existe || { echo "::error::Cluster '$KIND_CLUSTER' nao ficou pronto. Se nenhum CD estiver rodando, remova a trava: docker network rm $TRAVA"; exit 1; }
+          fi
+          kind export kubeconfig --internal --name "$KIND_CLUSTER"
+          kubectl get nodes -o wide
+
+      - name: Terraform (namespace identidade, segredos, keycloak-db, Keycloak, realm)
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          # State unico de antes da separacao dos repositorios: os recursos dele ja existem
+          # no cluster e colidiriam com este state novo. Migre antes (README, Migracao).
+          if [ -e "${STATE_DIR}/terraform.tfstate" ]; then
+            echo "::error::Existe ${STATE_DIR}/terraform.tfstate (ambiente anterior a separacao dos repositorios). Siga a secao 'Migracao' do README antes de implantar."
+            exit 1
+          fi
+          terraform init -input=false -reconfigure -backend-config="path=${STATE_DIR}/identidade.tfstate"
+          terraform apply -input=false -auto-approve
+
+      - name: Aguarda o realm publicado
+        run: |
+          set -euo pipefail
+          url="${KEYCLOAK_URL}/realms/revenda/.well-known/openid-configuration"
+          for _ in $(seq 1 60); do
+            if curl -fsS -o /dev/null --max-time 5 "$url"; then echo "OK: $url"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::Sem resposta 2xx de $url em 300 s"
+          exit 1
+
+      - name: Testes do realm contra o ambiente implantado (pytest -m realm)
+        id: testes
+        run: |
+          set -euo pipefail
+          segredo() {
+            local valor
+            valor="$(kubectl -n "$NS_ID" get secret "$1" -o jsonpath="{.data.$2}" | base64 -d)"
+            if [ -z "$valor" ]; then echo "::error::Secret $NS_ID/$1 sem a chave $2" >&2; return 1; fi
+            printf '%s' "$valor"
+          }
+          GESTOR_PASSWORD="$(segredo keycloak-gestor GESTOR_PASSWORD)"
+          echo "::add-mask::${GESTOR_PASSWORD}"
+          E2E_ADMIN_CLIENT_SECRET="$(segredo keycloak-e2e E2E_ADMIN_CLIENT_SECRET)"
+          echo "::add-mask::${E2E_ADMIN_CLIENT_SECRET}"
+          export GESTOR_PASSWORD E2E_ADMIN_CLIENT_SECRET
+          python3 -m venv "${RUNNER_TEMP}/venv"
+          "${RUNNER_TEMP}/venv/bin/python" -m pip install --disable-pip-version-check --quiet -r tests/requirements.txt
+          "${RUNNER_TEMP}/venv/bin/python" -m pytest tests -m realm -p no:cacheprovider -v -rA \
+            --junitxml="${RUNNER_TEMP}/realm-junit.xml"
+
+      - name: Diagnostico em falha
+        if: ${{ failure() }}
+        run: |
+          kubectl -n "$NS_ID" get pods,jobs,svc -o wide || true
+          kubectl -n "$NS_ID" get events --sort-by=.lastTimestamp | tail -n 40 || true
+          kubectl -n "$NS_ID" logs deployment/keycloak --tail=150 || true
+          kubectl -n "$NS_ID" logs job/keycloak-reconciliar --tail=80 || true
+
+      - name: Resumo da implantacao
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Deploy da identidade (kind \`${KIND_CLUSTER}\`, namespace \`${NS_ID}\`)"
+            echo ""
+            echo "| Item | Valor |"
+            echo "|---|---|"
+            echo "| Commit | \`${SHA:-?}\` |"
+            echo "| Evento | ${GITHUB_EVENT_NAME} |"
+            pronto="$(kubectl -n "$NS_ID" get deployment keycloak -o jsonpath='{.status.readyReplicas}/{.status.replicas}' 2>/dev/null || echo '?')"
+            echo "| Keycloak pronto | ${pronto} |"
+            echo "| Testes do realm | ${{ steps.testes.outcome || 'nao executado' }} |"
+            if [ -f "${RUNNER_TEMP}/realm-junit.xml" ]; then
+              linha="$(grep -o '<testsuite [^>]*>' "${RUNNER_TEMP}/realm-junit.xml" | head -n 1)"
+              attr() { printf '%s' "$linha" | sed -n "s/.* $1=\"\([^\"]*\)\".*/\1/p"; }
+              echo "| Resultado | $(attr tests) testes, $(attr failures) falhas, $(attr errors) erros |"
+            fi
+            echo "| Keycloak (no PC) | http://localhost:8180 |"
+            echo "| Issuer publicado | http://localhost:8180/realms/revenda |"
+          } >> "$GITHUB_STEP_SUMMARY"

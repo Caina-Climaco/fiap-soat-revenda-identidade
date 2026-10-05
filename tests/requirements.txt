@@ -1,0 +1,4 @@
+# Dependencias dos testes do realm (rodam no CI contra o docker-compose e no CD contra o
+# cluster). Sem dependencia de nenhum outro repositorio.
+pytest>=8.3,<10
+httpx>=0.28,<1

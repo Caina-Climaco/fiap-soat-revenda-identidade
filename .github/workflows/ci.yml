@@ -1,0 +1,218 @@
+# Integracao continua do servico de identidade (docs/ci-cd.md).
+# Roda no runner hospedado do GitHub, sem segredos e sem acesso ao cluster.
+# Os jobs `qualidade`, `realm` e `infra` sao required status checks da main: NAO
+# renomear. Sem paths-ignore: os checks obrigatorios precisam rodar em todo PR.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  PYTHON_VERSION: "3.12"
+  TERRAFORM_VERSION: "~1.16"
+  TRIVY_VERSION: "v0.70.0"
+
+jobs:
+  qualidade:
+    name: qualidade
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Realm do Keycloak (JSON valido e contrato publicado)
+        run: |
+          set -euo pipefail
+          arquivo=keycloak/realm-revenda.json
+          jq empty "$arquivo"
+          verificar() {
+            if ! jq -e "$1" "$arquivo" >/dev/null; then
+              echo "::error file=${arquivo}::Contrato do realm violado: $2"
+              exit 1
+            fi
+          }
+          verificar '.realm == "revenda"' 'realm deve se chamar revenda'
+          verificar '.registrationAllowed == true' 'autocadastro de clientes deve estar habilitado'
+          verificar '.bruteForceProtected == true' 'protecao contra forca bruta desligada'
+          verificar '[.roles.realm[]?.name] | index("cliente") != null' 'papel de realm cliente ausente'
+          verificar '[.roles.realm[]?.name] | index("gestor") != null' 'papel de realm gestor ausente'
+          for c in revenda-api revenda-swagger revenda-e2e revenda-e2e-admin; do
+            verificar "[.clients[]?.clientId] | index(\"$c\") != null" "client $c ausente"
+          done
+          verificar '.clients[] | select(.clientId == "revenda-e2e") | .directAccessGrantsEnabled == true' 'revenda-e2e precisa de directAccessGrantsEnabled'
+          # LGPD (minimizacao): access token so com sub (escopo basic) e papeis (roles).
+          for c in revenda-swagger revenda-e2e; do
+            verificar ".clients[] | select(.clientId == \"$c\") | (.defaultClientScopes | index(\"basic\") != null and index(\"roles\") != null)" "client $c precisa dos escopos padrao basic e roles"
+            verificar ".clients[] | select(.clientId == \"$c\") | ([.defaultClientScopes[] | select(. == \"profile\" or . == \"email\")] | length == 0)" "client $c nao pode ter profile/email como escopo padrao (minimizacao LGPD)"
+          done
+          # Client tecnico do e2e: segredo so por placeholder e privilegio minimo.
+          # Aspas simples de proposito: "${...}" e o placeholder literal do arquivo.
+          # shellcheck disable=SC2016
+          verificar '.clients[] | select(.clientId == "revenda-e2e-admin") | .secret == "${E2E_ADMIN_CLIENT_SECRET}"' 'segredo do revenda-e2e-admin deve vir do placeholder'
+          verificar '.users[] | select(.serviceAccountClientId == "revenda-e2e-admin") | (.clientRoles["realm-management"] | sort == ["manage-users","query-users","view-users"])' 'revenda-e2e-admin deve ter so manage-users, view-users e query-users'
+          # shellcheck disable=SC2016
+          verificar '[.users[] | select(.username == "gestor.loja") | .credentials[0].value] == ["${GESTOR_PASSWORD}"]' 'senha do gestor deve vir do placeholder'
+          echo "Realm OK"
+
+      - name: Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Testes do realm compilam (ruff)
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --quiet "ruff>=0.13,<1"
+          ruff check tests
+          ruff format --check tests
+
+      - name: Trivy - segredos no repositorio
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: table
+          exit-code: "1"
+
+  # Sobe o Keycloak REAL (docker-compose.yml deste repositorio) e testa o contrato do realm:
+  # discovery/JWKS, papeis, minimizacao do token, perfil (CPF/telefone), autocadastro e
+  # privilegio minimo do client tecnico.
+  realm:
+    name: realm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Segredos efemeros do CI (gerados agora, nunca versionados)
+        run: |
+          set -euo pipefail
+          gerar() { tr -dc 'A-Za-z0-9' </dev/urandom | head -c "$1"; }
+          {
+            echo "KC_DB_PASSWORD=$(gerar 32)"
+            echo "KC_BOOTSTRAP_ADMIN_PASSWORD=$(gerar 24)"
+            echo "GESTOR_PASSWORD=Ci-$(gerar 16)-9a"
+            echo "E2E_ADMIN_CLIENT_SECRET=$(gerar 40)"
+          } > .env
+          while IFS='=' read -r _ valor; do echo "::add-mask::${valor}"; done < .env
+
+      - name: docker compose up (Keycloak + PostgreSQL)
+        run: |
+          set -euo pipefail
+          docker compose up -d --wait --wait-timeout 300
+          docker compose ps
+
+      - name: Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Testes do realm (pytest)
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --quiet -r tests/requirements.txt
+          set -a; . ./.env; set +a
+          export KEYCLOAK_URL=http://localhost:8180
+          python -m pytest tests -m realm -p no:cacheprovider -v
+
+      - name: Logs do Keycloak em falha
+        if: ${{ failure() }}
+        run: docker compose logs --tail=200 keycloak
+
+      - name: docker compose down
+        if: ${{ always() }}
+        run: docker compose down -v
+
+  infra:
+    name: infra
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive -diff infra/terraform
+
+      - name: terraform init (sem backend)
+        run: terraform -chdir=infra/terraform init -backend=false -input=false
+
+      - name: terraform validate
+        run: terraform -chdir=infra/terraform validate
+
+      - name: Cluster kind (infra/kind/cluster.yaml valido e portas da plataforma)
+        run: |
+          set -euo pipefail
+          arquivo=infra/kind/cluster.yaml
+          yq -e '.kind == "Cluster" and .name == "revenda"' "$arquivo" >/dev/null \
+            || { echo "::error file=${arquivo}::YAML invalido ou sem kind: Cluster / name: revenda"; exit 1; }
+          for par in 30080:8080 30180:8180 30432:15432; do
+            c="${par%%:*}"; h="${par##*:}"
+            yq -e "[.nodes[].extraPortMappings[] | select(.containerPort == ${c} and .hostPort == ${h})] | length == 1" "$arquivo" >/dev/null \
+              || { echo "::error file=${arquivo}::extraPortMapping ${c} -> ${h} ausente"; exit 1; }
+          done
+          yq -e '.nodes[0].image | test("^kindest/node:v[0-9.]+@sha256:[0-9a-f]{64}$")' "$arquivo" >/dev/null \
+            || { echo "::error file=${arquivo}::imagem do no deve ser fixada por digest"; exit 1; }
+          echo "Config do kind OK"
+
+      - name: Runner em container (hadolint no Dockerfile, shellcheck no entrypoint)
+        env:
+          HADOLINT_VERSION: v2.15.1
+          HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+        run: |
+          set -euo pipefail
+          shellcheck infra/runner/entrypoint.sh
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/hadolint" \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  ${RUNNER_TEMP}/hadolint" | sha256sum -c -
+          chmod +x "${RUNNER_TEMP}/hadolint"
+          "${RUNNER_TEMP}/hadolint" infra/runner/Dockerfile
+          echo "Runner OK"
+
+  # Titulo do PR (vira a mensagem do squash na main) em Conventional Commits.
+  titulo-pr:
+    name: titulo-pr
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Conventional Commits
+        env:
+          TITULO: ${{ github.event.pull_request.title }}
+        run: |
+          padrao='^(feat|fix|docs|refactor|test|chore|ci|build|perf|style|revert)(\([a-z0-9._-]+\))?!?: .+'
+          if [[ "$TITULO" =~ $padrao ]]; then
+            echo "Titulo OK: $TITULO"
+          else
+            echo "::error::Titulo do PR fora do padrao Conventional Commits: '$TITULO'. Exemplo: 'feat(realm): novo atributo no perfil'"
+            exit 1
+          fi
