@@ -175,7 +175,7 @@ jobs:
           arquivo=infra/kind/cluster.yaml
           yq -e '.kind == "Cluster" and .name == "revenda"' "$arquivo" >/dev/null \
             || { echo "::error file=${arquivo}::YAML invalido ou sem kind: Cluster / name: revenda"; exit 1; }
-          for par in 30080:8080 30180:8180 30432:15432; do
+          for par in 30080:8080 30180:8180 30432:15432 30300:3000 30900:9090; do
             c="${par%%:*}"; h="${par##*:}"
             yq -e "[.nodes[].extraPortMappings[] | select(.containerPort == ${c} and .hostPort == ${h})] | length == 1" "$arquivo" >/dev/null \
               || { echo "::error file=${arquivo}::extraPortMapping ${c} -> ${h} ausente"; exit 1; }
