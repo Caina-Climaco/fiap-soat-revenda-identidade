@@ -16,7 +16,7 @@ Na versão anterior, o cluster era criado pela CLI kind a partir de `infra/kind/
 ## Decisão
 
 - O cluster kind `revenda` é uma **plataforma compartilhada**, como uma conta de nuvem comum aos dois serviços.
-- Ele é criado pela **CLI `kind`**, nunca pelo Terraform, a partir de `infra/kind/cluster.yaml`, e esse arquivo é **idêntico nos dois repositórios**: um nó control-plane, imagem do nó fixada por digest (release kind v0.33.0, Kubernetes 1.34), `podSubnet` `10.244.0.0/16` e as portas da plataforma inteira, todas em `127.0.0.1`: 8080 → 30080 (API), 8180 → 30180 (Keycloak) e 15432 → 30432 (banco da API).
+- Ele é criado pela **CLI `kind`**, nunca pelo Terraform, a partir de `infra/kind/cluster.yaml`, e esse arquivo é **idêntico nos dois repositórios**: um nó control-plane, imagem do nó fixada por digest (release kind v0.33.0, Kubernetes 1.34), `podSubnet` `10.244.0.0/16` e as portas da plataforma inteira, todas em `127.0.0.1`: 8080 → 30080 (Kong, entrada da API), 8180 → 30180 (Keycloak), 15432 → 30432 (banco da API), 3000 → 30300 (Grafana) e 9090 → 30900 (Prometheus).
 - O CD de cada repositório, e o script 04 de cada um, criam o cluster **se ele não existir** (`kind get clusters | grep -qx revenda || kind create cluster --config infra/kind/cluster.yaml --wait 120s`). Quem chegar primeiro cria; o outro encontra o cluster pronto.
 - Cada repositório tem **o seu namespace, o seu Terraform e o seu state**. Este repositório gerencia só o namespace `identidade` (`%USERPROFILE%\.revenda\identidade.tfstate`) e não conhece o namespace `revenda` da API. Os providers usam o contexto `kind-revenda` do kubeconfig.
 - Mudar o `cluster.yaml` exige PR nos dois repositórios, com o mesmo conteúdo; o job `infra` do CI confere nome, portas e digest.
@@ -36,7 +36,7 @@ Na versão anterior, o cluster era criado pela CLI kind a partir de `infra/kind/
 - O cluster fica fora de qualquer state: mudar o `cluster.yaml` só tem efeito recriando o cluster, o que derruba os dois serviços.
 - Os dois arquivos podem divergir se um PR for feito só num repositório; a configuração efetiva é a de quem criou o cluster.
 - Apagar o cluster (`05-destruir-ambiente.ps1 -ApagarCluster`) derruba também a API, e o state da API fica desatualizado.
-- O `cluster.yaml` deste repositório contém portas e comentários da API (por exemplo, 15432 do banco dela).
+- O `cluster.yaml` deste repositório contém portas e comentários da API (por exemplo, 15432 do banco dela, 3000 do Grafana e 9090 do Prometheus).
 - Não há trava entre os dois CDs: se ambos tentarem criar o cluster ao mesmo tempo, o `kind create` do segundo falha e ele passa a esperar (até 3 minutos) pelo cluster criado pelo outro.
 - A separação entre os namespaces é de responsabilidade, não de permissão: os dois runners usam o kubeconfig de administrador do kind e, tecnicamente, o CD da API conseguiria ler ou alterar o namespace `identidade`. O contrato define o que ele lê (só os Secrets `keycloak-gestor` e `keycloak-e2e`).
 
@@ -53,6 +53,6 @@ Na versão anterior, o cluster era criado pela CLI kind a partir de `infra/kind/
 |---|---|---|
 | **Cluster kind compartilhado, CLI kind, namespace e state por repositório** (escolhida) | Um cluster; independência por namespace e state; só binários assinados | `cluster.yaml` duplicado; o cluster fica fora do Terraform |
 | Um cluster kind por repositório | Isolamento total | Dobro de memória; as portas do host teriam de mudar; a API precisaria alcançar o JWKS de outro cluster pelo host |
-| Repositório "de plataforma" só para o cluster | Dono único do `cluster.yaml` | Terceiro repositório e terceiro pipeline para um arquivo de 38 linhas |
+| Repositório "de plataforma" só para o cluster | Dono único do `cluster.yaml` | Terceiro repositório e terceiro pipeline para um arquivo de cerca de 50 linhas |
 | Cluster criado pelo Terraform (`tehcyx/kind`) num dos repositórios | Cluster no state | Provider bloqueado pelo Smart App Control; um repositório passaria a ser dono da plataforma do outro |
 | Tudo num repositório só (versão anterior) | Simples | O serviço de identidade não seria "totalmente apartado" |

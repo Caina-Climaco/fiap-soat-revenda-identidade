@@ -36,7 +36,7 @@ TIMEOUT = httpx.Timeout(20.0, connect=5.0)
 OBRIGATORIAS = ("GESTOR_PASSWORD", "E2E_ADMIN_CLIENT_SECRET")
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+def pytest_collection_modifyitems() -> None:
     ausentes = [v for v in OBRIGATORIAS if not os.environ.get(v)]
     if ausentes:
         raise pytest.UsageError(f"defina {', '.join(ausentes)} (ver README, secao 'Como testar')")

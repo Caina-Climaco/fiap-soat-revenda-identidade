@@ -75,7 +75,7 @@ jobs:
       - name: Testes do realm compilam (ruff)
         run: |
           set -euo pipefail
-          python -m pip install --disable-pip-version-check --quiet "ruff>=0.13,<1"
+          python -m pip install --disable-pip-version-check --quiet "ruff==0.16.10"  # mesma versao do uv.lock da API
           ruff check tests
           ruff format --check tests
 

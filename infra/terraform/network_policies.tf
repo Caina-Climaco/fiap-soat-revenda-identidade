@@ -1,4 +1,4 @@
-# NetworkPolicies de entrada dos bancos (docs/contrato-identidade.md, secao Seguranca).
+# NetworkPolicy de entrada do banco do Keycloak (docs/contrato-identidade.md, secao Seguranca).
 # O CNI padrao do kind (kindnet) aplica NetworkPolicy desde o kind v0.24; ver
 # docs/contrato-identidade.md (secao Seguranca) para o teste de bloqueio.
 #
