@@ -64,6 +64,9 @@ flowchart LR
   end
 
   subgraph RAPI["repositório fiap-soat-revenda-veiculos"]
+    subgraph NSG["namespace gateway"]
+      kong["Kong (API Gateway)<br/>única entrada da API"]
+    end
     subgraph NSR["namespace revenda"]
       api["revenda-api"]
       dbr[("revenda-db<br/>vendas guardam só o sub")]
@@ -71,7 +74,8 @@ flowchart LR
   end
 
   navegador -->|"cadastro e login :8180<br/>OIDC, Authorization Code + PKCE"| kc
-  navegador -->|"Bearer JWT :8080"| api
+  navegador -->|"Bearer JWT :8080"| kong
+  kong -->|"encaminha (JWT validado na API)"| api
   api -->|"JWKS: chaves públicas RS256"| kc
   kc -->|"JDBC (NetworkPolicy: só o Keycloak)"| dbk
   api -->|"SQL"| dbr
@@ -91,7 +95,7 @@ flowchart TB
     r2["runner da API"]
     subgraph kind["cluster kind revenda (infra/kind/cluster.yaml, idêntico nos dois repositórios)"]
       ns1["namespace identidade"]
-      ns2["namespace revenda"]
+      ns2["namespaces revenda, gateway e observabilidade"]
     end
     st1[("identidade.tfstate")]
     st2[("state da API")]
@@ -180,7 +184,7 @@ A API, no `docker-compose.yml` dela, valida os tokens com o issuer `http://local
 
 ### 3.2 Opção B — cluster kind no Windows
 
-**Pré-requisitos**: Windows 10/11, Docker Desktop (com o `kubectl` que ele instala), kind, Terraform, gh (autenticado com `gh auth login`) e git. Portas livres: 8080, 8180 e 15432. Rode na raiz do repositório, em PowerShell normal (sem administrador), por exemplo `powershell -ExecutionPolicy Bypass -File .\scripts\windows\04-subir-ambiente.ps1`.
+**Pré-requisitos**: Windows 10/11, Docker Desktop (com o `kubectl` que ele instala), kind, Terraform, gh (autenticado com `gh auth login`) e git. Portas livres em `127.0.0.1`: 8080 (Kong/API), 8180 (Keycloak), 15432 (banco da API), 3000 (Grafana) e 9090 (Prometheus) — as cinco do `infra/kind/cluster.yaml`, que é compartilhado com a API. Rode na raiz do repositório, em PowerShell normal (sem administrador), por exemplo `powershell -ExecutionPolicy Bypass -File .\scripts\windows\04-subir-ambiente.ps1`.
 
 | # | Script | O que faz |
 |---|---|---|
