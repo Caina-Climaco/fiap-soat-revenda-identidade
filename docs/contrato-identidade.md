@@ -150,17 +150,24 @@ Os valores dos Secrets de contrato e os do realm ficam sempre iguais: o Job `key
 
 ## 7. O que é só do ambiente local
 
-Itens que existem para o ambiente de demonstração e não devem ir para produção:
+Este repositório entrega um ambiente de **demonstração local** (Tech Challenge). Várias escolhas foram feitas de propósito para esse cenário e **não servem para produção**. Esta seção é a referência única dessas escolhas; o README, os ADRs e o `keycloak/README.md` apontam para cá.
 
-| Item | Em produção |
-|---|---|
-| Client `revenda-e2e` (password grant) | Remover |
-| Client `revenda-e2e-admin` | Remover (ou restringir a um ambiente de testes isolado) |
-| Usuário seed `gestor.loja` com senha gerada | Gestores reais cadastrados por um processo administrativo |
-| `sslRequired: none`, HTTP, `KC_HOSTNAME=http://localhost:8180` | TLS obrigatório e hostname público; o issuer muda e os consumidores precisam ser reconfigurados |
-| Keycloak em `start-dev`, uma réplica | Modo `start`, cache distribuído, mais de uma réplica |
-| Redirect URIs em `http://localhost:8080` | URLs reais dos front-ends |
-| Recuperação de senha e verificação de e-mail desligadas | Ligar, com servidor SMTP |
+### 7.1 Ambiente local versus produção
+
+| Item | Ambiente local (como está) | Produção (o que mudaria) |
+|---|---|---|
+| Modo do Keycloak | `start-dev --import-realm`: HTTP, cache local, sem build otimizado, uma réplica (`infra/terraform/keycloak.tf`, linhas 48-53 e 89; `docker-compose.yml`, linha 33) | `start --optimized` a partir de uma imagem construída com `kc.sh build`, cache distribuído (Infinispan) e mais de uma réplica |
+| Hostname e TLS | `KC_HOSTNAME=http://localhost:8180` e `KC_HTTP_ENABLED=true` (`keycloak.tf`, linhas 141 e 150; `docker-compose.yml`, linhas 39 e 41); realm com `sslRequired: "none"` (`keycloak/realm-revenda.json`, linha 5) | `KC_HOSTNAME` com o domínio público real e TLS terminado no Keycloak ou no proxy (`KC_PROXY_HEADERS`); `sslRequired: external` (TLS exigido fora de redes privadas) ou `all`; `KC_HTTP_ENABLED` desligado. O issuer muda e os consumidores precisam ser reconfigurados (seção 8) |
+| `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` | `true`, para o JWKS ser buscado por `keycloak.identidade.svc.cluster.local:8080` enquanto o issuer fica em `localhost:8180` (`keycloak.tf`, linha 146; `docker-compose.yml`, linha 40) | Conforme a topologia: `false` quando frontchannel e backchannel usam a mesma URL pública; `true` só se os serviços internos precisarem de um endereço diferente, e nesse caso com TLS também no backchannel |
+| Client `revenda-e2e` (password grant) | Existe e está habilitado (`realm-revenda.json`, linha 260) | Inexistente ou `enabled: false`; o password grant não deve existir em produção. Restringir na API os `azp` aceitos (`OIDC_AZP_PERMITIDOS`) |
+| Client `revenda-e2e-admin` (client credentials) | Existe e está habilitado (`realm-revenda.json`, linha 303); segredo no Secret `identidade/keycloak-e2e` | Inexistente ou desativado; se um ambiente de testes isolado precisar dele, com segredo rotacionado por processo próprio |
+| Papéis do `revenda-e2e-admin` | A conta de serviço tem `manage-users`, `view-users` e `query-users` de `realm-management` (`realm-revenda.json`, linhas 357-364). `manage-users` permite criar, alterar e apagar qualquer usuário do realm **e atribuir papéis de realm a ele, inclusive `gestor`** | Papel mínimo para o caso de uso (`view-users` e `query-users`, somente leitura) ou um usuário de serviço separado por operação, cada um com o menor conjunto de papéis; nunca `manage-users` para um consumidor externo |
+| Admin bootstrap (`admin` do realm `master`) | Senha gerada pelo Terraform, guardada no state local e no Secret `identidade/keycloak-admin` (`infra/terraform/secrets.tf`, linhas 57-58); criada na primeira subida e nunca rotacionada (rotacionar exige recriar o `keycloak-db`) | Credencial temporária, usada só para criar um administrador permanente e depois removida; senha num cofre (Vault, Secrets Manager, External Secrets) com rotação; state remoto com criptografia e locking ([ADR-002](adrs/ADR-002-segredos-terraform-state-externo.md)) |
+| Usuário seed `gestor.loja` com senha gerada | Criado pelo import e mantido pelo Job `keycloak-reconciliar` | Gestores reais cadastrados por um processo administrativo |
+| Redirect URIs em `http://localhost:8080` | `revenda-swagger` aponta para o Swagger UI local | URLs reais dos front-ends, só `https` |
+| Recuperação de senha e verificação de e-mail | Desligadas: não há servidor de e-mail | Ligadas, com servidor SMTP |
+
+Os números de linha referem-se aos arquivos na `main` no momento desta revisão; confira com `grep -n` se o arquivo mudou.
 
 ## 8. Como o contrato muda
 

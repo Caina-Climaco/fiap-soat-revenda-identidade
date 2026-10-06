@@ -22,7 +22,7 @@ O CI roda sem segredos do repositório e sem acesso ao cluster. Ele usa `permiss
 
 Os nomes dos jobs `qualidade`, `realm` e `infra` são os *required status checks* da `main`; renomeá-los exige mudar a proteção da branch.
 
-**Dependabot** ([`.github/dependabot.yml`](../.github/dependabot.yml)) abre PRs semanais (segunda-feira) para as GitHub Actions, as dependências dos testes (`tests/requirements.txt`) e as imagens do `docker-compose.yml`. Esses PRs passam pelo mesmo CI.
+**Dependabot** ([`.github/dependabot.yml`](../.github/dependabot.yml)) abre PRs semanais (segunda-feira) para as GitHub Actions, as dependências dos testes (`tests/requirements.txt`) e as imagens do `docker-compose.yml`. Esses PRs passam pelo mesmo CI. Todas as `uses:` do `ci.yml` e do `cd.yml` são fixadas pelo SHA completo do commit, com a versão em comentário (`# vX.Y.Z`), e é o Dependabot (`package-ecosystem: github-actions`) que atualiza SHA e comentário juntos; uma tag móvel como `@v7` nunca é usada, porque pode ser reapontada por quem controla o repositório da action.
 
 ## 2. CD
 

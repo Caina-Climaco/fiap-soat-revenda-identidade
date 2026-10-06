@@ -35,13 +35,13 @@ O CI verifica, via `jq`, que a conta de serviço tem exatamente esses três pap�
 
 ### Negativas
 
-- `manage-users` ainda é um privilégio alto dentro do realm `revenda`: permite criar, alterar e apagar qualquer usuário, inclusive o `gestor.loja`.
+- `manage-users` ainda é um privilégio alto dentro do realm `revenda`: permite criar, alterar e apagar qualquer usuário, inclusive o `gestor.loja`, e também **atribuir papéis de realm a qualquer usuário, inclusive `gestor`** (os *role mappings* de usuário fazem parte de `manage-users`). Quem tiver o segredo do client pode, portanto, promover um comprador a gestor. Isso é aceitável só no ambiente local de demonstração.
 - Mais um client e mais um segredo para manter.
 - Exigiu uma mudança coordenada nos testes da API (variáveis `E2E_KC_CLIENT_ID` e `E2E_KC_CLIENT_SECRET` no lugar do admin do `master`).
 
 ### Mitigações
 
-- O client existe só no ambiente local e está marcado para remoção em produção ([contrato, seção 7](../contrato-identidade.md#7-o-que-é-só-do-ambiente-local)).
+- O client existe só no ambiente local e está marcado para remoção em produção ([contrato, seção 7](../contrato-identidade.md#7-o-que-é-só-do-ambiente-local)). Em produção, o caminho é inexistir ou ficar desativado; se um ambiente de testes isolado precisar de algo parecido, com papel mínimo (`view-users` e `query-users`) ou um usuário de serviço separado por operação ([contrato, seção 7.1](../contrato-identidade.md#71-ambiente-local-versus-produção)).
 - O segredo é gerado pelo Terraform, nunca versionado, e só é lido pelo CD da API, que roda apenas código já mergeado na `main`.
 - Se o `gestor.loja` for alterado por engano, o Job `keycloak-reconciliar` restaura a senha e os papéis na próxima execução.
 

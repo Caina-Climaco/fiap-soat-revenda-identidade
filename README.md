@@ -402,7 +402,8 @@ O script 04 avisa se encontrar o `terraform.tfstate` antigo.
 ## 10. Limitações conhecidas
 
 - **Keycloak em `start-dev`**: HTTP, sem cache distribuído, uma réplica. Adequado ao ambiente local, não a produção.
-- **Clients só de teste**: `revenda-e2e` (password grant) e `revenda-e2e-admin` existem só no ambiente local e devem ser removidos em produção.
+- **Clients só de teste**: `revenda-e2e` (password grant) e `revenda-e2e-admin` existem só no ambiente local e devem ser removidos em produção. O `manage-users` do `revenda-e2e-admin` permite, além de criar e apagar usuários, atribuir papéis de realm (inclusive `gestor`).
+- **Escolhas "não para produção"**: `start-dev`, `sslRequired: none`, `KC_HOSTNAME=http://localhost:8180`, `manage-users` no client técnico e admin bootstrap sem rotação estão listados, item a item e com o que mudaria em produção, em [docs/contrato-identidade.md, seção 7.1 "Ambiente local versus produção"](docs/contrato-identidade.md#71-ambiente-local-versus-produção).
 - **CPF sem unicidade garantida**: o perfil valida o formato, mas o Keycloak não impede o mesmo CPF em duas contas; o identificador único é o e-mail. O CPF também é editável pelo próprio usuário.
 - **Recuperação de senha e verificação de e-mail desligadas**: não há servidor de e-mail no ambiente local.
 - **Mudanças no realm não chegam a um realm existente**: o import é `IGNORE_EXISTING`. Uma mudança no `realm-revenda.json` exige recriar a identidade (05 e depois 04) ou aplicá-la pela Admin API ([docs/contrato-identidade.md](docs/contrato-identidade.md#8-como-o-contrato-muda)).
