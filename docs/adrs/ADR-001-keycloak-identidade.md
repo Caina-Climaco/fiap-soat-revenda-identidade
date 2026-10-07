@@ -44,7 +44,7 @@ Os consumidores só usam o contrato publicado em [docs/contrato-identidade.md](.
 
 - Mais um componente para operar e mais memória no cluster (JVM; *limit* de 1536 MiB).
 - O Keycloak não garante unicidade de atributos customizados, como o CPF.
-- No ambiente local ele roda em `start-dev` (HTTP, sem cache distribuído, uma réplica).
+- No ambiente local ele roda em `start-dev` (HTTP, sem cache distribuído, uma réplica), com `sslRequired: "none"` no realm e `KC_HOSTNAME=http://localhost:8180`: escolhas de demonstração, não de produção.
 - O import do realm é `IGNORE_EXISTING`: mudanças no JSON não chegam a um realm já criado.
 - Dois repositórios exigem coordenação quando o contrato muda.
 
@@ -54,7 +54,7 @@ Os consumidores só usam o contrato publicado em [docs/contrato-identidade.md](.
 - O e-mail é o identificador único; o formato do CPF é validado pelo perfil; a unicidade do CPF fica registrada como limitação conhecida.
 - O Job `keycloak-reconciliar` mantém a senha do gestor e o segredo do client técnico iguais aos Secrets, apesar do `IGNORE_EXISTING`. Outras mudanças no realm exigem recriar a identidade ou usar a Admin API, como descrito no contrato.
 - Mudanças de contrato seguem o processo do [contrato, seção 8](../contrato-identidade.md#8-como-o-contrato-muda): PR aqui, PR coordenado na API, identidade primeiro.
-- Para produção: modo `start` com TLS, hostname público e cache distribuído; remover `revenda-e2e` e `revenda-e2e-admin`; restringir na API os clients aceitos (`OIDC_AZP_PERMITIDOS`, cujo padrão aceita `revenda-swagger` e `revenda-e2e`).
+- Para produção: `start --optimized` com TLS (`sslRequired: external` ou `all`), `KC_HOSTNAME` público e cache distribuído; remover ou desativar `revenda-e2e` e `revenda-e2e-admin`; restringir na API os clients aceitos (`OIDC_AZP_PERMITIDOS`, cujo padrão aceita `revenda-swagger` e `revenda-e2e`). A lista completa, item a item e com os arquivos e linhas envolvidos, está no [contrato, seção 7.1 "Ambiente local versus produção"](../contrato-identidade.md#71-ambiente-local-versus-produção).
 
 ## Alternativas consideradas
 

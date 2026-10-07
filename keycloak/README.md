@@ -30,3 +30,4 @@ Pelo mesmo motivo, **mudanças neste JSON não chegam a um realm já existente**
 
 - Unicidade do CPF não é garantida pelo Keycloak; o e-mail é o identificador único.
 - O CPF é editável pelo próprio usuário: o perfil declarativo não tem permissão "só no cadastro"; restringir a edição ao admin tiraria o campo do formulário de registro.
+- Escolhas só do ambiente local: `start-dev`, `sslRequired=none` (linha 5 do JSON), clients `revenda-e2e` e `revenda-e2e-admin` e o `manage-users` da conta de serviço (linhas 357-364), que também permite atribuir o papel `gestor`. O que cada item vira em produção está em [docs/contrato-identidade.md, seção 7.1](../docs/contrato-identidade.md#71-ambiente-local-versus-produção).
