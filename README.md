@@ -1,8 +1,8 @@
-# Revenda de Veículos — Serviço de Identidade
+# Revenda de Veículos: Serviço de Identidade
 
 [![CI](https://github.com/Caina-Climaco/fiap-soat-revenda-identidade/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Caina-Climaco/fiap-soat-revenda-identidade/actions/workflows/ci.yml)
 
-Trabalho Substitutivo do Tech Challenge — FIAP PósTech Software Architecture (SOAT), Fase 3.
+Trabalho Substitutivo do Tech Challenge, FIAP PósTech Software Architecture (SOAT), Fase 3.
 Autor: Cainã Clímaco (RM366473), trabalho individual.
 
 > **Esta entrega tem dois repositórios.** Este é o do **serviço de identidade**: cadastro, login e autorização dos compradores, com Keycloak e banco próprios. A **API** de revenda (Catálogo e Vendas) está em **[fiap-soat-revenda-veiculos](https://github.com/Caina-Climaco/fiap-soat-revenda-veiculos)**. Para subir o ambiente completo, comece por **este** repositório.
@@ -154,13 +154,13 @@ Pontos importantes:
 
 Há duas formas. As duas publicam o Keycloak em `http://localhost:8180`, portanto **não rode as duas ao mesmo tempo**.
 
-| | Opção A — docker compose | Opção B — cluster kind (igual ao CD) |
+| | Opção A: docker compose | Opção B: cluster kind (igual ao CD) |
 |---|---|---|
 | Para quê | Desenvolvimento do realm, testes rápidos, API rodando no compose dela | Ambiente completo, o mesmo que o CD implanta |
 | Requer | Docker | Windows, Docker Desktop, kind, Terraform, kubectl, gh |
 | Segredos | Você define no `.env` | Gerados pelo Terraform, lidos com `kubectl` |
 
-### 3.1 Opção A — docker compose
+### 3.1 Opção A: docker compose
 
 ```bash
 cp .env.example .env      # PowerShell: Copy-Item .env.example .env
@@ -173,7 +173,7 @@ O compose sobe o `keycloak-db` numa rede interna, sem porta no host, e o Keycloa
 | Serviço | Endereço |
 |---|---|
 | Keycloak | http://localhost:8180 |
-| Console admin (realm `master`) | http://localhost:8180/admin/ — `KC_BOOTSTRAP_ADMIN_USERNAME` e `KC_BOOTSTRAP_ADMIN_PASSWORD` do `.env` |
+| Console admin (realm `master`) | http://localhost:8180/admin/ (`KC_BOOTSTRAP_ADMIN_USERNAME` e `KC_BOOTSTRAP_ADMIN_PASSWORD` do `.env`) |
 | Discovery do realm | http://localhost:8180/realms/revenda/.well-known/openid-configuration |
 | Conta do cliente (cadastro pelo link "Registre-se") | http://localhost:8180/realms/revenda/account |
 | Usuário gestor | `gestor.loja` (ou `gestor@revenda.local`), senha `GESTOR_PASSWORD` do `.env` |
@@ -182,9 +182,9 @@ Senhas no `.env`: use letras e dígitos. `GESTOR_PASSWORD` aceita também `!#%*-
 
 A API, no `docker-compose.yml` dela, valida os tokens com o issuer `http://localhost:8180/realms/revenda` e busca o JWKS por `http://host.docker.internal:8180/...`, ou seja, neste Keycloak.
 
-### 3.2 Opção B — cluster kind no Windows
+### 3.2 Opção B: cluster kind no Windows
 
-**Pré-requisitos**: Windows 10/11, Docker Desktop (com o `kubectl` que ele instala), kind, Terraform, gh (autenticado com `gh auth login`) e git. Portas livres em `127.0.0.1`: 8080 (Kong/API), 8180 (Keycloak), 15432 (banco da API), 3000 (Grafana) e 9090 (Prometheus) — as cinco do `infra/kind/cluster.yaml`, que é compartilhado com a API. Rode na raiz do repositório, em PowerShell normal (sem administrador), por exemplo `powershell -ExecutionPolicy Bypass -File .\scripts\windows\04-subir-ambiente.ps1`.
+**Pré-requisitos**: Windows 10/11, Docker Desktop (com o `kubectl` que ele instala), kind, Terraform, gh (autenticado com `gh auth login`) e git. Portas livres em `127.0.0.1`: 8080 (Kong/API), 8180 (Keycloak), 15432 (banco da API), 3000 (Grafana) e 9090 (Prometheus), as cinco do `infra/kind/cluster.yaml`, que é compartilhado com a API. Rode na raiz do repositório, em PowerShell normal (sem administrador), por exemplo `powershell -ExecutionPolicy Bypass -File .\scripts\windows\04-subir-ambiente.ps1`.
 
 | # | Script | O que faz |
 |---|---|---|
@@ -431,5 +431,5 @@ O script 04 avisa se encontrar o `terraform.tfstate` antigo.
 
 ---
 
-**Autor**: Cainã Clímaco (RM366473) — FIAP PósTech Software Architecture (SOAT), Trabalho Substitutivo do Tech Challenge, Fase 3.
+**Autor**: Cainã Clímaco (RM366473), FIAP PósTech Software Architecture (SOAT), Trabalho Substitutivo do Tech Challenge, Fase 3.
 Repositório da API: https://github.com/Caina-Climaco/fiap-soat-revenda-veiculos
