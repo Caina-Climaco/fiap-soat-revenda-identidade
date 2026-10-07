@@ -8,10 +8,10 @@
 
 ## Tipo
 
-- [ ] feat — funcionalidade (realm, perfil, clients)
-- [ ] fix — correção
-- [ ] infra — Terraform, pipelines, scripts
-- [ ] docs — documentação
+- [ ] feat: funcionalidade (realm, perfil, clients)
+- [ ] fix: correção
+- [ ] infra: Terraform, pipelines, scripts
+- [ ] docs: documentação
 - [ ] test / refactor / chore
 
 ## Checklist
